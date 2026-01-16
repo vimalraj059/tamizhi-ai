@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+langdetect
+sentence-transformers
+chromadb
+numpy
+pydantic
+python-multipart
+jinja2

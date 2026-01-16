@@ -1,0 +1,193 @@
+import os
+from fastapi import FastAPI, Request, Form
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+from starlette.middleware.sessions import SessionMiddleware
+from groq import Groq
+
+# Google OAuth
+from auth_google import oauth
+
+# Chat storage (NO init_db used)
+from storage.chat_store import (
+    load_user_chats,
+    create_new_chat,
+    add_message,
+    load_messages
+)
+
+# --------------------------------------------------
+# APP INIT
+# --------------------------------------------------
+
+app = FastAPI(title="Tamizhi – Tamil Intelligence System")
+
+# REQUIRED for Google OAuth
+app.add_middleware(
+    SessionMiddleware,
+    secret_key="tamizhi-session-secret"
+)
+
+# Static & Templates
+app.mount("/static", StaticFiles(directory="ui/static"), name="static")
+templates = Jinja2Templates(directory="ui/templates")
+
+# --------------------------------------------------
+# GROQ
+# --------------------------------------------------
+
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+client = Groq(api_key=GROQ_API_KEY)
+
+# --------------------------------------------------
+# TEMP FIXED LOGIN (backup only)
+# --------------------------------------------------
+
+FIXED_USERNAME = "tamizhi"
+FIXED_PASSWORD = "tamizhi@123"
+
+# --------------------------------------------------
+# LOGIN PAGE
+# --------------------------------------------------
+
+@app.get("/login", response_class=HTMLResponse)
+async def login_page(request: Request):
+    return templates.TemplateResponse("login.html", {"request": request})
+
+
+@app.post("/login")
+async def login(username: str = Form(...), password: str = Form(...)):
+    if username == FIXED_USERNAME and password == FIXED_PASSWORD:
+        res = RedirectResponse("/", status_code=302)
+        res.set_cookie("user", username, httponly=True)
+        return res
+
+    return HTMLResponse("❌ Invalid username or password", status_code=401)
+
+
+@app.get("/logout")
+async def logout():
+    res = RedirectResponse("/login", status_code=302)
+    res.delete_cookie("user")
+    return res
+
+# --------------------------------------------------
+# GOOGLE AUTH
+# --------------------------------------------------
+
+@app.get("/auth/google")
+async def google_login(request: Request):
+    redirect_uri = request.url_for("google_callback")
+    return await oauth.google.authorize_redirect(request, redirect_uri)
+
+
+@app.get("/auth/google/callback")
+async def google_callback(request: Request):
+    token = await oauth.google.authorize_access_token(request)
+    user = token.get("userinfo")
+
+    if not user:
+        return RedirectResponse("/login")
+
+    email = user.get("email")
+
+    response = RedirectResponse("/", status_code=302)
+    response.set_cookie("user", email, httponly=True)
+    return response
+
+# --------------------------------------------------
+# HOME (CHAT UI)
+# --------------------------------------------------
+
+@app.get("/", response_class=HTMLResponse)
+async def home(request: Request):
+    user = request.cookies.get("user")
+    if not user:
+        return RedirectResponse("/login")
+
+    chats = load_user_chats(user)
+
+    if not chats:
+        chat = create_new_chat(user)
+        chats = [chat]
+
+    active_chat = chats[0]
+    messages = load_messages(active_chat["id"])
+
+    return templates.TemplateResponse(
+        "index.html",
+        {
+            "request": request,
+            "user": user,
+            "chats": chats,
+            "active_chat": active_chat,
+            "messages": messages
+        }
+    )
+
+# --------------------------------------------------
+# NEW CHAT
+# --------------------------------------------------
+
+@app.post("/new-chat")
+async def new_chat(request: Request):
+    user = request.cookies.get("user")
+    if not user:
+        return JSONResponse({"error": "Login required"}, status_code=401)
+
+    chat = create_new_chat(user)
+    return chat
+
+# --------------------------------------------------
+# CHAT API
+# --------------------------------------------------
+
+@app.post("/ask")
+async def ask(request: Request):
+    user = request.cookies.get("user")
+    if not user:
+        return {"answer": "❌ Login required"}
+
+    data = await request.json()
+    question = data.get("question", "").strip()
+    chat_id = data.get("chat_id")
+
+    if not question:
+        return {"answer": "தயவு செய்து ஒரு கேள்வியை உள்ளிடுங்கள்."}
+
+    # Save user message
+    add_message(user, chat_id, "user", question)
+
+    try:
+        completion = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You are Tamizhi, a world-class Tamil AI engine. "
+                        "Respond deeply, beautifully, clearly and emotionally in Tamil. "
+                        "If the user asks in English, explain in Tamil."
+                    )
+                },
+                {"role": "user", "content": question}
+            ],
+            timeout=15
+        )
+
+        answer = completion.choices[0].message.content
+
+        # Save assistant message
+        add_message(user, chat_id, "assistant", answer)
+
+        return {"answer": answer}
+
+    except Exception as e:
+        print("❌ GROQ ERROR:", e)
+        return {
+            "answer": (
+                "⚠️ Tamizhi தற்போது பதிலளிக்க முடியவில்லை.\n"
+                "சிறிது நேரத்தில் மீண்டும் முயற்சிக்கவும்."
+            )
+        }

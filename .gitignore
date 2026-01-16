@@ -1,0 +1,18 @@
+# Environment & secrets
+.env
+api key.txt
+
+# Databases
+*.db
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Audio temp files
+temp_*.wav
+voice_*.mp3
+
+# Virtual environment
+.venv/

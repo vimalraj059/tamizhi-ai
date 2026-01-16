@@ -1,0 +1,30 @@
+body {
+    background: linear-gradient(135deg, #000, #333);
+    height: 100vh;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    font-family: sans-serif;
+}
+
+.auth-box {
+    background: white;
+    padding: 30px;
+    width: 300px;
+    border-radius: 12px;
+    text-align: center;
+}
+
+.auth-box input {
+    width: 100%;
+    padding: 10px;
+    margin: 8px 0;
+}
+
+.auth-box button {
+    width: 100%;
+    padding: 10px;
+    background: black;
+    color: white;
+    border: none;
+}

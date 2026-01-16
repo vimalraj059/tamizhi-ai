@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="ta">
+<head>
+  <meta charset="UTF-8">
+  <title>Tamizhi</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+
+<body>
+
+<div class="layout">
+
+  <!-- ================= SIDEBAR ================= -->
+  <aside class="sidebar">
+    <div class="logo-box" onclick="location.reload()">
+      <img src="/static/images/tamizhi_logo (2).png" alt="Tamizhi">
+      <span>Tamizhi</span>
+    </div>
+
+    <button class="new-chat" id="newChatBtn">＋ New Chat</button>
+
+    <!-- CHAT HISTORY -->
+    <div class="chat-list" id="chatList"></div>
+
+    <div class="profile">
+      👤 {{ user }}
+    </div>
+
+    <a href="/logout" class="logout">Logout</a>
+  </aside>
+
+  <!-- ================= CHAT ================= -->
+  <main class="chat-container">
+
+    <div class="chat-messages" id="messages"></div>
+
+    <!-- CHAT INPUT -->
+    <form class="chat-input" id="chat-form">
+
+      <!-- 🎤 MIC BUTTON -->
+      <button type="button" id="micBtn" title="Speak">🎤</button>
+
+      <!-- TEXT INPUT -->
+      <input
+        id="user-input"
+        placeholder="தமிழில் பேசுங்கள் அல்லது தட்டச்சு செய்யுங்கள்..."
+        autocomplete="off"
+      />
+
+      <!-- SEND BUTTON -->
+      <button type="submit">➤</button>
+    </form>
+
+  </main>
+
+</div>
+
+<script>
+/* =================================================
+   GLOBAL STATE
+================================================= */
+let activeChatId = null;
+
+/* =================================================
+   MESSAGE RENDER
+================================================= */
+function addMessage(role, text) {
+  const messages = document.getElementById("messages");
+  const div = document.createElement("div");
+  div.className = "bubble " + (role === "assistant" ? "bot" : "user");
+  div.innerText = text;
+  messages.appendChild(div);
+  messages.scrollTop = messages.scrollHeight;
+}
+
+/* =================================================
+   LOAD CHAT LIST (SIDEBAR) – WITH RENAME
+================================================= */
+async function loadChats() {
+  const res = await fetch("/chats");
+  const chats = await res.json();
+
+  const chatList = document.getElementById("chatList");
+  chatList.innerHTML = "";
+
+  chats.forEach(chat => {
+    const div = document.createElement("div");
+    div.className = "chat-item";
+    div.innerText = chat.title;
+
+    // ACTIVE CHAT HIGHLIGHT
+    if (chat.chat_id === activeChatId) {
+      div.classList.add("active");
+    }
+
+    // CLICK = LOAD CHAT
+    div.onclick = () => {
+      activeChatId = chat.chat_id;
+      loadChat(chat.chat_id);
+      loadChats();
+    };
+
+    // DOUBLE CLICK = RENAME CHAT
+    div.ondblclick = () => {
+      const input = document.createElement("input");
+      input.value = chat.title;
+      input.className = "chat-rename-input";
+
+      input.onblur = async () => {
+        const newTitle = input.value.trim();
+        if (newTitle) {
+          await fetch("/chat/rename", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              chat_id: chat.chat_id,
+              title: newTitle
+            })
+          });
+        }
+        loadChats();
+      };
+
+      input.onkeydown = e => {
+        if (e.key === "Enter") input.blur();
+      };
+
+      div.innerHTML = "";
+      div.appendChild(input);
+      input.focus();
+    };
+
+    chatList.appendChild(div);
+  });
+
+  // AUTO LOAD LATEST CHAT ON FIRST LOAD
+  if (!activeChatId && chats.length > 0) {
+    activeChatId = chats[0].chat_id;
+    loadChat(activeChatId);
+  }
+}
+
+/* =================================================
+   LOAD SINGLE CHAT
+================================================= */
+async function loadChat(chatId) {
+  const res = await fetch(`/chat/${chatId}`);
+  const messages = await res.json();
+
+  const container = document.getElementById("messages");
+  container.innerHTML = "";
+
+  messages.forEach(m => {
+    addMessage(m.role, m.content);
+  });
+}
+
+/* =================================================
+   NEW CHAT
+================================================= */
+document.getElementById("newChatBtn").onclick = async () => {
+  const res = await fetch("/chat/new", { method: "POST" });
+  const data = await res.json();
+
+  activeChatId = data.chat_id;
+  document.getElementById("messages").innerHTML = "";
+  addMessage("assistant", "🙏 புதிய உரையாடல் தொடங்கப்பட்டது");
+
+  loadChats();
+};
+
+/* =================================================
+   SEND MESSAGE
+================================================= */
+async function sendMessage(text) {
+  if (!activeChatId) return;
+
+  addMessage("user", text);
+
+  const res = await fetch("/ask", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      question: text,
+      chat_id: activeChatId
+    })
+  });
+
+  const data = await res.json();
+  addMessage("assistant", data.answer);
+
+  // REFRESH SIDEBAR (TITLE UPDATE)
+  loadChats();
+
+  // VOICE REPLY
+  const ttsRes = await fetch("/text-to-voice", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text: data.answer })
+  });
+
+  const audio = new Audio(URL.createObjectURL(await ttsRes.blob()));
+  audio.play();
+}
+
+/* =================================================
+   FORM SUBMIT
+================================================= */
+document.getElementById("chat-form").addEventListener("submit", e => {
+  e.preventDefault();
+  const input = document.getElementById("user-input");
+  const text = input.value.trim();
+  if (!text) return;
+  input.value = "";
+  sendMessage(text);
+});
+
+/* =================================================
+   VOICE RECOGNITION
+================================================= */
+const micBtn = document.getElementById("micBtn");
+const SpeechRecognition =
+  window.SpeechRecognition || window.webkitSpeechRecognition;
+
+const recognition = new SpeechRecognition();
+recognition.lang = "ta-IN";
+recognition.continuous = false;
+
+micBtn.onclick = () => {
+  micBtn.classList.add("recording");
+  recognition.start();
+};
+
+recognition.onresult = e => {
+  micBtn.classList.remove("recording");
+  const text = e.results[0][0].transcript;
+  sendMessage(text);
+};
+
+recognition.onerror = () => {
+  micBtn.classList.remove("recording");
+  alert("Voice not detected");
+};
+
+/* =================================================
+   INIT
+================================================= */
+loadChats();
+</script>
+
+</body>
+</html>
