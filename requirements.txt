@@ -5,4 +5,5 @@ python-multipart
 starlette
 gtts
 groq
-requests
+authlib
+itsdangerous
