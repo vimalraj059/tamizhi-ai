@@ -3,7 +3,7 @@ uvicorn
 jinja2
 python-multipart
 starlette
+itsdangerous
 gtts
 groq
 authlib
-itsdangerous
