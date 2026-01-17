@@ -5,7 +5,7 @@ from fastapi import FastAPI, Request, Form
 from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from starlette.middleware.sessions import SessionMiddleware
+
 
 from gtts import gTTS
 
@@ -39,10 +39,10 @@ create_tables()
 # --------------------------------------------------
 # MIDDLEWARE
 # --------------------------------------------------
-app.add_middleware(
-    SessionMiddleware,
-    secret_key="tamizhi-super-secret"
-)
+# app.add_middleware(
+#     SessionMiddleware,
+#     secret_key="tamizhi-super-secret"
+# )
 
 # --------------------------------------------------
 # STATIC & TEMPLATES
